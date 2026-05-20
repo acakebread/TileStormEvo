@@ -1,11 +1,20 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <title>Redirecting...</title>
-    <meta http-equiv="refresh" content="0; url=WebGL/">
+    <script>
+      const target = `WebGL/${window.location.search || ""}${window.location.hash || ""}`;
+      window.location.replace(target);
+      window.addEventListener("DOMContentLoaded", () => {
+        const link = document.getElementById("fallback-link");
+        if (link) {
+          link.href = target;
+        }
+      });
+    </script>
   </head>
   <body>
-    <p>Redirecting to game… <a href="WebGL/">Click here if it doesn't load</a></p>
+    <p>Redirecting to game... <a id="fallback-link" href="WebGL/">Click here if it doesn't load</a></p>
   </body>
 </html>
