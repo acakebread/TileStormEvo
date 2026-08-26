@@ -6,24 +6,9 @@
     <title>Unity Web Player | TileStormEvolution</title>
     <link rel="shortcut icon" href="TemplateData/favicon.ico">
     <link rel="stylesheet" href="TemplateData/style.css">
-    <link rel="manifest" href="manifest.webmanifest">
-    <style>
-      #unity-fullscreen-button {
-        position: absolute;
-        right: 12px;
-        bottom: 12px;
-        z-index: 10;
-        padding: 8px 12px;
-        border: 0;
-        border-radius: 4px;
-        background: rgba(0,0,0,.65);
-        color: white;
-        cursor: pointer;
-      }
-    </style>
   </head>
   <body>
-    <div id="unity-container">
+    <div id="unity-container" class="unity-desktop">
       <canvas id="unity-canvas" width=1200 height=800 tabindex="-1"></canvas>
       <div id="unity-loading-bar">
         <div id="unity-logo"></div>
@@ -32,66 +17,117 @@
         </div>
       </div>
       <div id="unity-warning"> </div>
-      <button id="unity-fullscreen-button" type="button">[ ]</button>
+      <div id="unity-footer">
+        <div id="unity-logo-title-footer"></div>
+        <div id="unity-fullscreen-button"></div>
+        <div id="unity-build-title">TileStormEvolution</div>
+      </div>
     </div>
     <script>
-      window.addEventListener("load", function () {
-        if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("ServiceWorker.js").catch((error) => {
-            console.warn("Service worker registration failed; continuing without offline cache.", error);
-          });
-        }
-      });
-
-      var container = document.querySelector("#unity-container");
       var canvas = document.querySelector("#unity-canvas");
-      var loadingBar = document.querySelector("#unity-loading-bar");
-      var progressBarFull = document.querySelector("#unity-progress-bar-full");
-      var warningBanner = document.querySelector("#unity-warning");
-      var unityInstance = null;
-      var fullscreenButton = document.querySelector("#unity-fullscreen-button");
-      fullscreenButton.onclick = () => {
-        if (unityInstance) unityInstance.SetFullscreen(1);
-        else canvas.requestFullscreen?.();
-      };
 
-      var version = "0.1.11";
+      // Shows a temporary message banner/ribbon for a few seconds, or
+      // a permanent error message on top of the canvas if type=='error'.
+      // If type=='warning', a yellow highlight color is used.
+      // Modify or remove this function to customize the visually presented
+      // way that non-critical warnings and error messages are presented to the
+      // user.
+      function unityShowBanner(msg, type) {
+        var warningBanner = document.querySelector("#unity-warning");
+        function updateBannerVisibility() {
+          warningBanner.style.display = warningBanner.children.length ? 'block' : 'none';
+        }
+        var div = document.createElement('div');
+        div.innerHTML = msg;
+        warningBanner.appendChild(div);
+        if (type == 'error') div.style = 'background: red; padding: 10px;';
+        else {
+          if (type == 'warning') div.style = 'background: yellow; padding: 10px;';
+          setTimeout(function() {
+            warningBanner.removeChild(div);
+            updateBannerVisibility();
+          }, 5000);
+        }
+        updateBannerVisibility();
+      }
+
       var buildUrl = "Build";
-      var loaderUrl = buildUrl + "/b00be0b2973e4eee3ffc636dd949a21d.loader.js?v=" + version;
+      var loaderUrl = buildUrl + "/TileStormEvolution-0.1.12-B.loader.js";
       var config = {
         arguments: [],
-        dataUrl: buildUrl + "/5184aca840fbe8b7df6479c1b1bf0d37.data.unityweb?v=" + version,
-        frameworkUrl: buildUrl + "/6b58587eaab5c67aa27ac9605cf1b480.framework.js.unityweb?v=" + version,
-        codeUrl: buildUrl + "/4426421e572ddac8ed73174cdd2d2f9c.wasm.unityweb?v=" + version,
+        dataUrl: buildUrl + "/TileStormEvolution-0.1.12-B.data.unityweb",
+        frameworkUrl: buildUrl + "/TileStormEvolution-0.1.12-B.framework.js.unityweb",
+        codeUrl: buildUrl + "/TileStormEvolution-0.1.12-B.wasm.unityweb",
         streamingAssetsUrl: "StreamingAssets",
         companyName: "MassiveHadron",
         productName: "TileStormEvolution",
-        productVersion: "0.1.11",
+        productVersion: "0.1.12",
+        showBanner: unityShowBanner,
+        // errorHandler: function(err, url, line) {
+        //    alert("error " + err + " occurred at line " + line);
+        //    // Return 'true' if you handled this error and don't want Unity
+        //    // to process it further, 'false' otherwise.
+        //    return true;
+        // },
       };
+
+      // By default, Unity keeps WebGL canvas render target size matched with
+      // the DOM size of the canvas element (scaled by window.devicePixelRatio)
+      // Set this to false if you want to decouple this synchronization from
+      // happening inside the engine, and you would instead like to size up
+      // the canvas DOM size and WebGL render target sizes yourself.
+      // config.matchWebGLToCanvasSize = false;
+
+      // If you would like all file writes inside Unity Application.persistentDataPath
+      // directory to automatically persist so that the contents are remembered when
+      // the user revisits the site the next time, uncomment the following line:
+      // config.autoSyncPersistentDataPath = true;
+      // This autosyncing is currently not the default behavior to avoid regressing
+      // existing user projects that might rely on the earlier manual
+      // JS_FileSystem_Sync() behavior, but in future Unity version, this will be
+      // expected to change.
 
       if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
         // Mobile device style: fill the whole browser client area with the game canvas:
+
         var meta = document.createElement('meta');
         meta.name = 'viewport';
         meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
         document.getElementsByTagName('head')[0].appendChild(meta);
+        document.querySelector("#unity-container").className = "unity-mobile";
+        canvas.className = "unity-mobile";
+
+        // To lower canvas resolution on mobile devices to gain some
+        // performance, uncomment the following line:
+        // config.devicePixelRatio = 1;
+
+
+      } else {
+        // Desktop style: Render the game canvas in a window that can be maximized to fullscreen:
+        canvas.style.width = "1200px";
+        canvas.style.height = "800px";
       }
 
-      loadingBar.style.display = "block";
+      document.querySelector("#unity-loading-bar").style.display = "block";
 
       var script = document.createElement("script");
       script.src = loaderUrl;
       script.onload = () => {
         createUnityInstance(canvas, config, (progress) => {
-          progressBarFull.style.width = 100 * progress + "%";
-        }).then((instance) => {
-          unityInstance = instance;
-          loadingBar.style.display = "none";
-        }).catch((message) => {
-          alert(message);
-        });
-      };
+          document.querySelector("#unity-progress-bar-full").style.width = 100 * progress + "%";
+              }).then((unityInstance) => {
+                document.querySelector("#unity-loading-bar").style.display = "none";
+                document.querySelector("#unity-fullscreen-button").onclick = () => {
+                  unityInstance.SetFullscreen(1);
+                };
+
+              }).catch((message) => {
+                alert(message);
+              });
+            };
+
       document.body.appendChild(script);
+
     </script>
   </body>
 </html>
