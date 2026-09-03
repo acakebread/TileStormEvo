@@ -7,6 +7,47 @@
     <link rel="shortcut icon" href="TemplateData/favicon.ico">
     <link rel="stylesheet" href="TemplateData/style.css">
     <link rel="manifest" href="manifest.webmanifest">
+    <script>
+      window.TileStormAnalytics = (() => {
+        const pending = [];
+        let retryCount = 0;
+        let retryTimer = null;
+
+        function flush() {
+          retryTimer = null;
+          if (window.goatcounter && typeof window.goatcounter.count === "function") {
+            while (pending.length > 0) {
+              window.goatcounter.count(pending.shift());
+            }
+            return;
+          }
+
+          if (pending.length > 0 && retryCount++ < 120) {
+            retryTimer = window.setTimeout(flush, 250);
+          }
+        }
+
+        return {
+          track(path, title, alwaysCount = true) {
+            if (!path) {
+              return;
+            }
+
+            pending.push({
+              path: String(path),
+              title: String(title || path),
+              event: true,
+              no_session: Boolean(alwaysCount)
+            });
+
+            if (!retryTimer) {
+              flush();
+            }
+          }
+        };
+      })();
+    </script>
+    <script data-goatcounter="https://acakebread.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
     <style>
       #unity-fullscreen-button {
         position: absolute;
@@ -55,18 +96,18 @@
         else canvas.requestFullscreen?.();
       };
 
-      var version = "0.1.16";
+      var version = "0.1.17";
       var buildUrl = "Build";
-      var loaderUrl = buildUrl + "/dc64d36b406638a2d841ac97272f08fa.loader.js?v=" + version;
+      var loaderUrl = buildUrl + "/d2cb0f957b4bf57fcea4ed150bc6d74a.loader.js?v=" + version;
       var config = {
         arguments: [],
-        dataUrl: buildUrl + "/fa46e553154cb93f86de3fa171802406.data.unityweb?v=" + version,
-        frameworkUrl: buildUrl + "/6eb3136114e3306b50ae5776194b553a.framework.js.unityweb?v=" + version,
-        codeUrl: buildUrl + "/690f8496075284a1bd9681d404fb8f22.wasm.unityweb?v=" + version,
+        dataUrl: buildUrl + "/c7510f60b6fcd51be2a2d907ea5d1945.data.unityweb?v=" + version,
+        frameworkUrl: buildUrl + "/75d09d7a1ede56a8b69bf0209def91cf.framework.js.unityweb?v=" + version,
+        codeUrl: buildUrl + "/44da9748246a035ff67265e5abb4c3bd.wasm.unityweb?v=" + version,
         streamingAssetsUrl: "StreamingAssets",
         companyName: "MassiveHadron",
         productName: "TileStormEvolution",
-        productVersion: "0.1.16",
+        productVersion: "0.1.17",
       };
 
       if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
@@ -87,7 +128,9 @@
         }).then((instance) => {
           unityInstance = instance;
           loadingBar.style.display = "none";
+          window.TileStormAnalytics.track("webgl-ready", "TileStorm WebGL runtime ready", true);
         }).catch((message) => {
+          window.TileStormAnalytics.track("webgl-load-failed", "TileStorm WebGL runtime failed", true);
           alert(message);
         });
       };
