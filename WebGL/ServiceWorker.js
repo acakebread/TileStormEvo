@@ -1,9 +1,9 @@
-const cacheName = "MassiveHadron-TileStormEvolution-0.1.85";
+const cacheName = "MassiveHadron-TileStormEvolution-0.1.86";
 const contentToCache = [
-    "Build/12111ece5ab2f33eed84b55e5220797c.loader.js",
+    "Build/05bcdcee2338a1c3d7021ca5037ecbe1.loader.js",
     "Build/76837ce15e3589537b4d6a65a5e9919b.framework.js.unityweb",
-    "Build/836191f6ad754f6bb774c8be21c7e993.data.unityweb",
-    "Build/9c5bbd06cff5890650025209c1aa102b.wasm.unityweb",
+    "Build/8477ade89fd07ff5e402c2628c29d6ab.data.unityweb",
+    "Build/e3c43423dd4400c9f209e2c878ac339d.wasm.unityweb",
     "TemplateData/style.css"
 
 ];
