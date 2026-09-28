@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1, viewport-fit=cover">
     <title>Unity Web Player | TileStormEvolution</title>
     <link rel="shortcut icon" href="TemplateData/favicon.ico">
     <link rel="stylesheet" href="TemplateData/style.css">
@@ -54,12 +55,25 @@
         right: 12px;
         bottom: 12px;
         z-index: 10;
+        min-width: 44px;
+        min-height: 44px;
         padding: 8px 12px;
         border: 0;
         border-radius: 4px;
         background: rgba(0,0,0,.65);
         color: white;
+        font-size: 18px;
         cursor: pointer;
+        touch-action: manipulation;
+      }
+      @media (pointer: coarse) {
+        #unity-fullscreen-button {
+          right: 16px;
+          bottom: 16px;
+          min-width: 56px;
+          min-height: 56px;
+          font-size: 22px;
+        }
       }
     </style>
   </head>
@@ -91,32 +105,80 @@
       var warningBanner = document.querySelector("#unity-warning");
       var unityInstance = null;
       var fullscreenButton = document.querySelector("#unity-fullscreen-button");
-      fullscreenButton.onclick = () => {
-        if (unityInstance) unityInstance.SetFullscreen(1);
-        else canvas.requestFullscreen?.();
+      var mobileExpanded = false;
+
+      function isIOS() {
+        return /iPhone|iPad|iPod/i.test(navigator.userAgent)
+          || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+      }
+
+      function fullscreenElement() {
+        return document.fullscreenElement || document.webkitFullscreenElement || null;
+      }
+
+      function updateFullscreenButton() {
+        var active = Boolean(fullscreenElement()) || mobileExpanded;
+        fullscreenButton.textContent = active ? "X" : "[ ]";
+        fullscreenButton.setAttribute("aria-label", active ? "Exit full screen" : "Full screen");
+      }
+
+      function setMobileExpanded(expanded) {
+        mobileExpanded = expanded;
+        document.documentElement.classList.toggle("mobile-expanded", expanded);
+        window.setTimeout(function () {
+          window.scrollTo(0, expanded ? 1 : 0);
+        }, 50);
+        updateFullscreenButton();
+      }
+
+      function enterFullscreen() {
+        var request = container.requestFullscreen || container.webkitRequestFullscreen;
+        if (!request) {
+          setMobileExpanded(true);
+          return;
+        }
+
+        Promise.resolve(request.call(container)).catch(function () {
+          setMobileExpanded(true);
+        });
+      }
+
+      function exitFullscreen() {
+        var exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (fullscreenElement() && exit) {
+          Promise.resolve(exit.call(document)).catch(function () {});
+        }
+        setMobileExpanded(false);
+      }
+
+      fullscreenButton.onclick = function () {
+        var active = Boolean(fullscreenElement()) || mobileExpanded;
+        if (unityInstance && !isIOS()) {
+          unityInstance.SetFullscreen(active ? 0 : 1);
+          return;
+        }
+
+        if (active) exitFullscreen();
+        else enterFullscreen();
       };
 
-      var version = "0.1.110";
+      document.addEventListener("fullscreenchange", updateFullscreenButton);
+      document.addEventListener("webkitfullscreenchange", updateFullscreenButton);
+      updateFullscreenButton();
+
+      var version = "0.1.111";
       var buildUrl = "Build";
-      var loaderUrl = buildUrl + "/1061fec9685bb45861f1a2865be1e415.loader.js?v=" + version;
+      var loaderUrl = buildUrl + "/fcc10c9b8c396b7dcf43907ecb4a92b0.loader.js?v=" + version;
       var config = {
         arguments: [],
-        dataUrl: buildUrl + "/7cce594dfff39ad056d1d0f0c19704af.data.unityweb?v=" + version,
+        dataUrl: buildUrl + "/07dccaa12a4c2c0945adccbe1141b420.data.unityweb?v=" + version,
         frameworkUrl: buildUrl + "/8cc69edc7e0fd18486a97f41b44852e7.framework.js.unityweb?v=" + version,
-        codeUrl: buildUrl + "/7a04de69b8c3c2316d5f260af653b5a6.wasm.unityweb?v=" + version,
+        codeUrl: buildUrl + "/e317290a595b823ac12bd81f5b137bf4.wasm.unityweb?v=" + version,
         streamingAssetsUrl: "StreamingAssets",
         companyName: "MassiveHadron",
         productName: "TileStormEvolution",
-        productVersion: "0.1.110",
+        productVersion: "0.1.111",
       };
-
-      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-        // Mobile device style: fill the whole browser client area with the game canvas:
-        var meta = document.createElement('meta');
-        meta.name = 'viewport';
-        meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
-        document.getElementsByTagName('head')[0].appendChild(meta);
-      }
 
       loadingBar.style.display = "block";
 
