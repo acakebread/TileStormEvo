@@ -7,8 +7,51 @@ html, body {
 html.mobile-expanded,
 html.mobile-expanded body {
     width: 100%;
-    height: 100%;
+}
+
+html.mobile-scroll-pending,
+html.mobile-scroll-pending body {
+    height: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
+    touch-action: pan-y;
+}
+
+html.mobile-scroll-locked,
+html.mobile-scroll-locked body {
+    height: 100dvh;
     overflow: hidden;
+    overscroll-behavior: none;
+}
+
+#mobile-fullscreen-spacer { display: none; }
+html.mobile-scroll-pending #mobile-fullscreen-spacer {
+    display: block;
+    height: 300vh;
+    width: 1px;
+    pointer-events: none;
+}
+
+#mobile-fullscreen-guide {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: pan-y;
+    background: rgba(0, 0, 0, .45);
+    color: white;
+    font: 18px/1.5 system-ui, sans-serif;
+}
+#mobile-fullscreen-guide[hidden] { display: none; }
+#mobile-fullscreen-guide p {
+    max-width: 28em;
+    margin: 24px;
+    padding: 16px;
+    border-radius: 8px;
+    background: #181d22;
+    text-align: center;
 }
 
 #unity-container {
@@ -22,6 +65,8 @@ html.mobile-expanded #unity-container {
     width: 100vw;
     height: 100dvh;
 }
+
+html.mobile-scroll-locked #unity-canvas { touch-action: none; }
 
 #unity-canvas {
     width: 100%;

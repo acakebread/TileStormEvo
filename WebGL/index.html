@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Unity Web Player | TileStormEvolution</title>
     <link rel="shortcut icon" href="TemplateData/favicon.ico">
-    <link rel="stylesheet" href="TemplateData/style.css">
+    <link rel="stylesheet" href="TemplateData/style.css?v=mobile-fullscreen-2">
     <link rel="manifest" href="manifest.webmanifest">
     <script>
       window.TileStormAnalytics = (() => {
@@ -52,9 +52,9 @@
     <style>
       #unity-fullscreen-button {
         position: absolute;
-        right: 12px;
-        bottom: 12px;
-        z-index: 10;
+        right: max(12px, env(safe-area-inset-right));
+        bottom: max(12px, env(safe-area-inset-bottom));
+        z-index: 30;
         min-width: 44px;
         min-height: 44px;
         padding: 8px 12px;
@@ -68,8 +68,8 @@
       }
       @media (pointer: coarse) {
         #unity-fullscreen-button {
-          right: 16px;
-          bottom: 16px;
+          right: max(16px, env(safe-area-inset-right));
+          bottom: max(16px, env(safe-area-inset-bottom));
           min-width: 56px;
           min-height: 56px;
           font-size: 22px;
@@ -89,6 +89,10 @@
       <div id="unity-warning"> </div>
       <button id="unity-fullscreen-button" type="button">[ ]</button>
     </div>
+    <div id="mobile-fullscreen-spacer" aria-hidden="true"></div>
+    <div id="mobile-fullscreen-guide" hidden>
+      <p role="status" aria-live="polite"></p>
+    </div>
     <script>
       window.addEventListener("load", function () {
         if ("serviceWorker" in navigator) {
@@ -106,6 +110,11 @@
       var unityInstance = null;
       var fullscreenButton = document.querySelector("#unity-fullscreen-button");
       var mobileExpanded = false;
+      var fullscreenAttempt = 0;
+      var fullscreenGuide = document.querySelector("#mobile-fullscreen-guide");
+      var fullscreenHint = fullscreenGuide.querySelector("p");
+      var mobileMeasureTimer = null;
+      var swipeInProgress = false;
 
       function isIOS() {
         return /iPhone|iPad|iPod/i.test(navigator.userAgent)
@@ -124,26 +133,77 @@
 
       function setMobileExpanded(expanded) {
         mobileExpanded = expanded;
+        swipeInProgress = false;
         document.documentElement.classList.toggle("mobile-expanded", expanded);
-        window.setTimeout(function () {
-          window.scrollTo(0, expanded ? 1 : 0);
-        }, 50);
+        document.documentElement.classList.remove("mobile-scroll-pending", "mobile-scroll-locked");
+        fullscreenGuide.hidden = true;
+        window.clearTimeout(mobileMeasureTimer);
+        if (expanded) measureMobileViewport();
+        else window.scrollTo(0, 0);
         updateFullscreenButton();
       }
 
+      function measureMobileViewport() {
+        if (!mobileExpanded) return;
+        var standalone = navigator.standalone || window.matchMedia("(display-mode: standalone)").matches
+          || window.matchMedia("(display-mode: fullscreen)").matches;
+        var landscape = window.matchMedia("(orientation: landscape)").matches;
+        var viewport = window.visualViewport;
+        // Landscape Safari can leave the home-indicator inset visible. Do not
+        // mistake that inset for an expanded toolbar. Zoom is not fullscreen.
+        var visibleHeight = viewport ? viewport.height + viewport.offsetTop : window.innerHeight;
+        var screenHeight = Math.min(window.screen.width, window.screen.height);
+        var barsCollapsed = standalone || (landscape && screenHeight > 0
+          && visibleHeight >= screenHeight - 24 && (!viewport || Math.abs(viewport.scale - 1) < 0.02));
+        if (barsCollapsed && swipeInProgress) return;
+        document.documentElement.classList.toggle("mobile-scroll-pending", !barsCollapsed);
+        document.documentElement.classList.toggle("mobile-scroll-locked", barsCollapsed);
+        fullscreenGuide.hidden = barsCollapsed;
+        fullscreenHint.textContent = landscape
+          ? "Swipe up here to hide the browser bars. Tap X to cancel."
+          : "Turn your phone sideways, then swipe up here to hide the browser bars. Tap X to cancel.";
+      }
+
+      function scheduleMobileMeasure() {
+        if (!mobileExpanded) return;
+        window.clearTimeout(mobileMeasureTimer);
+        mobileMeasureTimer = window.setTimeout(measureMobileViewport, 180);
+      }
+
+      // This overlay deliberately allows native document scrolling. A swipe on
+      // Unity's canvas is consumed by the game and cannot collapse Safari's UI.
+      fullscreenGuide.addEventListener("touchstart", function () { swipeInProgress = true; }, { passive: true });
+      function finishSwipe() { swipeInProgress = false; scheduleMobileMeasure(); }
+      fullscreenGuide.addEventListener("touchend", finishSwipe, { passive: true });
+      fullscreenGuide.addEventListener("touchcancel", finishSwipe, { passive: true });
+      window.addEventListener("resize", scheduleMobileMeasure, { passive: true });
+      window.addEventListener("orientationchange", scheduleMobileMeasure, { passive: true });
+      window.addEventListener("scroll", scheduleMobileMeasure, { passive: true });
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener("resize", scheduleMobileMeasure, { passive: true });
+        window.visualViewport.addEventListener("scroll", scheduleMobileMeasure, { passive: true });
+      }
+
       function enterFullscreen() {
+        var attempt = ++fullscreenAttempt;
+        function fallback() {
+          if (attempt === fullscreenAttempt && !fullscreenElement()) setMobileExpanded(true);
+        }
         var request = container.requestFullscreen || container.webkitRequestFullscreen;
         if (!request) {
-          setMobileExpanded(true);
+          fallback();
           return;
         }
 
-        Promise.resolve(request.call(container)).catch(function () {
-          setMobileExpanded(true);
-        });
+        try {
+          Promise.resolve(request.call(container)).catch(fallback);
+          // Some prefixed implementations return without entering fullscreen.
+          window.setTimeout(fallback, 1200);
+        } catch (_) { fallback(); }
       }
 
       function exitFullscreen() {
+        ++fullscreenAttempt;
         var exit = document.exitFullscreen || document.webkitExitFullscreen;
         if (fullscreenElement() && exit) {
           Promise.resolve(exit.call(document)).catch(function () {});
@@ -162,22 +222,30 @@
         else enterFullscreen();
       };
 
-      document.addEventListener("fullscreenchange", updateFullscreenButton);
-      document.addEventListener("webkitfullscreenchange", updateFullscreenButton);
+      function onFullscreenChange() {
+        ++fullscreenAttempt;
+        if (fullscreenElement()) setMobileExpanded(false);
+        updateFullscreenButton();
+      }
+      document.addEventListener("fullscreenchange", onFullscreenChange);
+      document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && mobileExpanded) exitFullscreen();
+      });
       updateFullscreenButton();
 
-      var version = "0.1.111";
+      var version = "0.1.112";
       var buildUrl = "Build";
-      var loaderUrl = buildUrl + "/fcc10c9b8c396b7dcf43907ecb4a92b0.loader.js?v=" + version;
+      var loaderUrl = buildUrl + "/d9a7b8d58297a8e17e5984bebd6a4d20.loader.js?v=" + version;
       var config = {
         arguments: [],
-        dataUrl: buildUrl + "/07dccaa12a4c2c0945adccbe1141b420.data.unityweb?v=" + version,
+        dataUrl: buildUrl + "/9d4ac02e49c9c9f430da54b2c70b2fca.data.unityweb?v=" + version,
         frameworkUrl: buildUrl + "/8cc69edc7e0fd18486a97f41b44852e7.framework.js.unityweb?v=" + version,
-        codeUrl: buildUrl + "/e317290a595b823ac12bd81f5b137bf4.wasm.unityweb?v=" + version,
+        codeUrl: buildUrl + "/99ace4e99596935b0ad9aeb1b99713c6.wasm.unityweb?v=" + version,
         streamingAssetsUrl: "StreamingAssets",
         companyName: "MassiveHadron",
         productName: "TileStormEvolution",
-        productVersion: "0.1.111",
+        productVersion: "0.1.112",
       };
 
       loadingBar.style.display = "block";
