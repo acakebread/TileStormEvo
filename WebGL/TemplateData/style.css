@@ -82,6 +82,17 @@ html.mobile-expanded #unity-container {
     height: 100dvh;
 }
 
+/* iPhone Safari owns the extreme top edge even after its bars collapse. Keep
+   Unity's top menu below that activation strip so opening a game menu does not
+   summon the browser chrome. */
+@media (orientation: landscape) and (pointer: coarse) {
+    html.mobile-expanded.mobile-scroll-locked #unity-container {
+        top: max(48px, env(safe-area-inset-top));
+        bottom: 0;
+        height: auto;
+    }
+}
+
 html.mobile-scroll-locked #unity-canvas { touch-action: none; }
 
 #unity-canvas {
