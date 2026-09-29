@@ -86,7 +86,7 @@ html.mobile-expanded #unity-container {
    Unity's top menu below that activation strip so opening a game menu does not
    summon the browser chrome. */
 @media (orientation: landscape) and (pointer: coarse) {
-    html.mobile-expanded.mobile-scroll-locked #unity-container {
+    html.mobile-expanded.mobile-scroll-locked:not(.mobile-fullscreen-proper) #unity-container {
         top: max(48px, env(safe-area-inset-top));
         bottom: 0;
         height: auto;

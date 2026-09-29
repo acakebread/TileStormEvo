@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Unity Web Player | TileStormEvolution</title>
     <link rel="shortcut icon" href="TemplateData/favicon.ico">
-    <link rel="stylesheet" href="TemplateData/style.css?v=mobile-fullscreen-5">
+    <link rel="stylesheet" href="TemplateData/style.css?v=mobile-fullscreen-6">
     <link rel="manifest" href="manifest.webmanifest">
     <script>
       window.TileStormAnalytics = (() => {
@@ -111,6 +111,7 @@
       var unityInstance = null;
       var fullscreenButton = document.querySelector("#unity-fullscreen-button");
       var mobileExpanded = false;
+      var mobileFullscreenStage = 0;
       var fullscreenAttempt = 0;
       var fullscreenGuide = document.querySelector("#mobile-fullscreen-guide");
       var fullscreenCancel = document.querySelector("#mobile-fullscreen-cancel");
@@ -128,15 +129,17 @@
       }
 
       function updateFullscreenButton() {
-        var active = Boolean(fullscreenElement()) || mobileExpanded;
+        var active = Boolean(fullscreenElement()) || mobileFullscreenStage > 1;
         fullscreenButton.textContent = active ? "X" : "[ ]";
         fullscreenButton.setAttribute("aria-label", active ? "Exit full screen" : "Full screen");
       }
 
-      function setMobileExpanded(expanded) {
+      function setMobileExpanded(expanded, stage) {
         mobileExpanded = expanded;
+        mobileFullscreenStage = expanded ? stage || 1 : 0;
         swipeInProgress = false;
         document.documentElement.classList.toggle("mobile-expanded", expanded);
+        document.documentElement.classList.toggle("mobile-fullscreen-proper", mobileFullscreenStage > 1);
         document.documentElement.classList.remove("mobile-scroll-pending", "mobile-scroll-locked");
         fullscreenGuide.hidden = true;
         window.clearTimeout(mobileMeasureTimer);
@@ -213,6 +216,13 @@
         } catch (_) { fallback(); }
       }
 
+      function enterMobileProperFullscreen() {
+        mobileFullscreenStage = 2;
+        document.documentElement.classList.add("mobile-fullscreen-proper");
+        measureMobileViewport();
+        updateFullscreenButton();
+      }
+
       function exitFullscreen() {
         ++fullscreenAttempt;
         var exit = document.exitFullscreen || document.webkitExitFullscreen;
@@ -223,13 +233,14 @@
       }
 
       fullscreenButton.onclick = function () {
-        var active = Boolean(fullscreenElement()) || mobileExpanded;
+        var active = Boolean(fullscreenElement()) || mobileFullscreenStage > 1;
         if (unityInstance && !isIOS()) {
           unityInstance.SetFullscreen(active ? 0 : 1);
           return;
         }
 
         if (active) exitFullscreen();
+        else if (mobileExpanded) enterMobileProperFullscreen();
         else enterFullscreen();
       };
 
@@ -245,18 +256,18 @@
       });
       updateFullscreenButton();
 
-      var version = "0.1.115";
+      var version = "0.1.116";
       var buildUrl = "Build";
       var loaderUrl = buildUrl + "/61eb254706ae4793c8102642f9d355fd.loader.js?v=" + version;
       var config = {
         arguments: [],
-        dataUrl: buildUrl + "/7fab3c2647aeca52a065c0b45ebe026f.data.unityweb?v=" + version,
+        dataUrl: buildUrl + "/b2eb7f1a18a4151f00b7b7886aaa0fb7.data.unityweb?v=" + version,
         frameworkUrl: buildUrl + "/8cc69edc7e0fd18486a97f41b44852e7.framework.js.unityweb?v=" + version,
         codeUrl: buildUrl + "/3f8a362835849d004f89babfcd9895f3.wasm.unityweb?v=" + version,
         streamingAssetsUrl: "StreamingAssets",
         companyName: "MassiveHadron",
         productName: "TileStormEvolution",
-        productVersion: "0.1.115",
+        productVersion: "0.1.116",
       };
 
       loadingBar.style.display = "block";
