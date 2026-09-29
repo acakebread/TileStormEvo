@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Unity Web Player | TileStormEvolution</title>
     <link rel="shortcut icon" href="TemplateData/favicon.ico">
-    <link rel="stylesheet" href="TemplateData/style.css?v=mobile-fullscreen-2">
+    <link rel="stylesheet" href="TemplateData/style.css?v=mobile-fullscreen-3">
     <link rel="manifest" href="manifest.webmanifest">
     <script>
       window.TileStormAnalytics = (() => {
@@ -91,6 +91,7 @@
     </div>
     <div id="mobile-fullscreen-spacer" aria-hidden="true"></div>
     <div id="mobile-fullscreen-guide" hidden>
+      <button id="mobile-fullscreen-cancel" type="button" aria-label="Exit full screen">X</button>
       <p role="status" aria-live="polite"></p>
     </div>
     <script>
@@ -112,6 +113,7 @@
       var mobileExpanded = false;
       var fullscreenAttempt = 0;
       var fullscreenGuide = document.querySelector("#mobile-fullscreen-guide");
+      var fullscreenCancel = document.querySelector("#mobile-fullscreen-cancel");
       var fullscreenHint = fullscreenGuide.querySelector("p");
       var mobileMeasureTimer = null;
       var swipeInProgress = false;
@@ -176,6 +178,14 @@
       function finishSwipe() { swipeInProgress = false; scheduleMobileMeasure(); }
       fullscreenGuide.addEventListener("touchend", finishSwipe, { passive: true });
       fullscreenGuide.addEventListener("touchcancel", finishSwipe, { passive: true });
+      fullscreenCancel.addEventListener("click", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        exitFullscreen();
+      });
+      fullscreenCancel.addEventListener("touchstart", function (event) {
+        event.stopPropagation();
+      }, { passive: true });
       window.addEventListener("resize", scheduleMobileMeasure, { passive: true });
       window.addEventListener("orientationchange", scheduleMobileMeasure, { passive: true });
       window.addEventListener("scroll", scheduleMobileMeasure, { passive: true });
@@ -234,18 +244,18 @@
       });
       updateFullscreenButton();
 
-      var version = "0.1.112";
+      var version = "0.1.113";
       var buildUrl = "Build";
       var loaderUrl = buildUrl + "/d9a7b8d58297a8e17e5984bebd6a4d20.loader.js?v=" + version;
       var config = {
         arguments: [],
-        dataUrl: buildUrl + "/9d4ac02e49c9c9f430da54b2c70b2fca.data.unityweb?v=" + version,
+        dataUrl: buildUrl + "/1c97e668956feb48ae1a492a9257e029.data.unityweb?v=" + version,
         frameworkUrl: buildUrl + "/8cc69edc7e0fd18486a97f41b44852e7.framework.js.unityweb?v=" + version,
         codeUrl: buildUrl + "/99ace4e99596935b0ad9aeb1b99713c6.wasm.unityweb?v=" + version,
         streamingAssetsUrl: "StreamingAssets",
         companyName: "MassiveHadron",
         productName: "TileStormEvolution",
-        productVersion: "0.1.112",
+        productVersion: "0.1.113",
       };
 
       loadingBar.style.display = "block";

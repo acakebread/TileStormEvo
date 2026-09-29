@@ -35,7 +35,7 @@ html.mobile-scroll-pending #mobile-fullscreen-spacer {
 #mobile-fullscreen-guide {
     position: fixed;
     inset: 0;
-    z-index: 20;
+    z-index: 50;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -45,6 +45,22 @@ html.mobile-scroll-pending #mobile-fullscreen-spacer {
     font: 18px/1.5 system-ui, sans-serif;
 }
 #mobile-fullscreen-guide[hidden] { display: none; }
+#mobile-fullscreen-cancel {
+    position: fixed;
+    right: max(16px, env(safe-area-inset-right));
+    bottom: max(16px, env(safe-area-inset-bottom));
+    z-index: 51;
+    min-width: 56px;
+    min-height: 56px;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, .72);
+    color: white;
+    font: 700 22px/1 system-ui, sans-serif;
+    cursor: pointer;
+    touch-action: manipulation;
+}
 #mobile-fullscreen-guide p {
     max-width: 28em;
     margin: 24px;
