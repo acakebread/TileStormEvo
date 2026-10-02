@@ -7,9 +7,9 @@ const cacheName = cachePrefix + buildVersion;
 // install time downloads it alongside Unity and can temporarily double buffers.
 // Unity's own IndexedDB data cache already owns the large .data response.
 const contentToCache = [
-    "Build/decf9f3abb25231642331c50edb789be.loader.js",
-    "Build/77d06e64a4a87b1359b3dff86c0379c6.framework.js.unityweb",
-    "Build/9aea7e0622cbb8de919bd46a0f3a7f35.wasm.unityweb",
+    "Build/3652a60b83dee971175f50e5f316e99b.loader.js",
+    "Build/bf623563e317b39dd03ce5369c8f404c.framework.js.unityweb",
+    "Build/14423a67f825e8a75806ea610d49012b.wasm.unityweb",
     "TemplateData/style.css"
 
 ];
