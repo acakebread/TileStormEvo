@@ -1,7 +1,7 @@
 // Frequency evidence orders a bounded spatial search; it cannot prove that a
 // large region is empty. Stop at the first header and return it to Previous
 // BSP's guided resolver, which finishes this same retained camera raster.
-importScripts('../pixelstow-spectrum.js?v=20261018-capture1','../pixelstow-transform.js?v=20261019-v6-native1','../pixelstow.js?v=20261020-square-edge1','./geometry.js?v=20261018-guided1','./search-plan.js?v=20261018-wavelength1','./search-gpu.js?v=20261019-gpu-output1');
+importScripts('../pixelstow-spectrum.js?v=20261018-capture1','../pixelstow-transform.js?v=20261019-v6-native1','../pixelstow.js?v=20261021-native-detail1','./geometry.js?v=20261018-guided1','./search-plan.js?v=20261018-wavelength1','./search-gpu.js?v=20261019-gpu-output1');
 const ids=[0,2,6,8],point=MarkerTrackerGeometry.point;
 const levels=new Map(),scratch=typeof OffscreenCanvas==='function'?new OffscreenCanvas(1,1):null;
 const ctx=scratch?.getContext('2d',{willReadFrequently:true});

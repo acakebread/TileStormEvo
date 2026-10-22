@@ -1,9 +1,9 @@
 // Shared whole-frame marker acquisition and GPU template tracking.
 (function(root){
   'use strict';
-  const defaultWorker=new URL('./acquire-worker.js?v=20261020-square-edge1',document.currentScript.src).href;
-  const verifyWorker=new URL('./verify-worker.js?v=20261020-square-edge1',document.currentScript.src).href;
-  const treeWorker=new URL('./tree-worker.js?v=20261020-square-edge1',document.currentScript.src).href;
+  const defaultWorker=new URL('./acquire-worker.js?v=20261021-native-detail1',document.currentScript.src).href;
+  const verifyWorker=new URL('./verify-worker.js?v=20261021-native-detail1',document.currentScript.src).href;
+  const treeWorker=new URL('./tree-worker.js?v=20261021-native-detail1',document.currentScript.src).href;
   function MarkerEngine({onStatus,workerUrl=defaultWorker,acquisition='bsp',debugSearch=false,liveFeedback=false,hardwareSearch=false}={}){
 
     const names={0:'top left',2:'top right',6:'bottom left',8:'bottom right'},scales=[8,4,16,2];

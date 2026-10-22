@@ -36,10 +36,14 @@
   const RISK_ALLOCATION_FLAG = 0x40000000;
   const V6_FRAME_LENGTH_MASK = 0x001FFFFF;
   const V6_LUMINANCE_FLAG = 0x00200000;
+  const V6_COLOUR_FLAG = 0x80; // Profile-specific: V5 uses this flag for its historical pilot.
+  const COLOUR_WAVELET_TINT = 0.8;
   const V6_BRIGHTNESS_SHIFT = 22;
   // Eight stored bits; 0..248 gives uniform steps, exact endpoints and an
-  // exactly representable 0.125 default. Codes 249..255 are invalid.
+  // exactly representable 0.125 adjustable default. 249 identifies the gentle
+  // RGB shoulder explicitly; 250..255 remain invalid.
   const V6_BRIGHTNESS_LEVELS = 248;
+  const V6_GENTLE_CURVE = 249;
   const DEFAULT_BRIGHTNESS_CURVE = 0.125;
   const RISK_GRID = 16;
   const RISK_TILES = RISK_GRID * RISK_GRID;
@@ -1072,8 +1076,8 @@
     if (!["linear", "sinusoidal", "magnifier-3-16", "luminance-v2"].includes(curve))
       throw frameError("Unsupported source brightness curve.");
     // A symmetric RGB map, including margins and marker reservations. Alpha is
-    // unchanged. V6 adds a restrained outward contrast lift at 3/16 and 13/16,
-    // then reserves the same headroom with its squared shoulder and exact inverse.
+    // unchanged. Adjustable V6 adds an outward contrast lift at 3/16 and 13/16,
+    // then reserves headroom with its squared shoulder. Gentle keeps the sine.
     const baseline = brightnessCurveBaseline(headroom);
     // Both directions use the exact quantised value protected by the preamble.
     const amount = normalizeBrightnessCurve(brightnessCurve);
@@ -1358,10 +1362,10 @@
     return output;
   }
 
-  function linearAmplitude(reference, width, x, y, requested) {
+  function linearAmplitude(reference, width, x, y, requested, localFit = false) {
     const fits = (amplitude) => [0, 1].every((bit) => {
       const bias = fitBias(reference, width, x, y, bit, amplitude);
-      return bias.fit.every(Boolean) && bias.shift.every((shift) => shift === 0);
+      return bias.fit.every(Boolean) && (localFit || bias.shift.every((shift) => shift === 0));
     });
     if (fits(requested)) return requested;
     let low = 0, high = requested;
@@ -1437,9 +1441,9 @@
     if (amplitude < 0) {
       const texture = signalPolicy ? textureAmplitude(signalPolicy.textureSource || reference, width, originX, originY,
         BLOCK, signalPolicy, signalPolicy.payloadPeak) : strength;
-      const requested = signalPolicy?.rangeHeadroom ? texture : signalPolicy
+      const requested = signalPolicy?.rangeHeadroom || signalPolicy?.localFit ? texture : signalPolicy
         ? limitBoostHeadroom(reference, width, originX, originY, texture, strength, signalPolicy.biasLimit) : strength;
-      amplitude = signalPolicy?.rangeHeadroom ? linearAmplitude(reference, width, originX, originY, requested)
+      amplitude = signalPolicy?.rangeHeadroom || signalPolicy?.localFit ? linearAmplitude(reference, width, originX, originY, requested, signalPolicy?.localFit)
         : resolveAmplitude(reference, width, originX, originY, requested);
       if (cacheIndex >= 0) amplitudeCache[cacheIndex] = amplitude;
     }
@@ -1451,15 +1455,84 @@
     const amplitude = blockAmplitude(reference, width, column, blockRow, strength, amplitudeCache, signalPolicy);
     if (amplitude === 0) return;
     const bias = fitBias(reference, width, originX, originY, bit, amplitude);
+    const coloured = signalPolicy?.tintPayload && fitTintedWavelet(reference, signalPolicy.colourSource || signalPolicy.textureSource || reference,
+      width, originX, originY, bit, amplitude, Boolean(signalPolicy.localFit));
     for (let dy = 0; dy < BLOCK; dy++) {
       for (let dx = 0; dx < BLOCK; dx++) {
         const index = (originX + dx + (originY + dy) * width) * 4;
-        image[index] = clampByte(reference[index] + appliedDelta(reference, index, dx, dy, bit, amplitude, 0, bias));
-        image[index + 1] = clampByte(reference[index + 1] + appliedDelta(reference, index, dx, dy, bit, amplitude, 1, bias));
-        image[index + 2] = clampByte(reference[index + 2] + appliedDelta(reference, index, dx, dy, bit, amplitude, 2, bias));
+        for (let c = 0; c < 3; c++) image[index + c] = coloured
+          ? reference[index + c] + coloured.delta[(dx + dy * 4) * 3 + c] + bias.shift[c]
+          : clampByte(reference[index + c] + appliedDelta(reference, index, dx, dy, bit, amplitude, c, bias));
         image[index + 3] = reference[index + 3];
       }
     }
+  }
+
+  function tintFromMeans(r, g, b) {
+    const mean = (r + g + b) / 3, denominator = Math.max(mean + 32, Math.abs(r - mean), Math.abs(g - mean), Math.abs(b - mean));
+    return [COLOUR_WAVELET_TINT * (r - mean) / denominator, COLOUR_WAVELET_TINT * (b - mean) / denominator];
+  }
+
+  // The original is the appearance target; the frozen prepared carrier is
+  // the fitting constraint. Neither palette path samples completed wavelets.
+  function signalTint(colourTarget, width, x, y, side) {
+    const count = side ** 2; let r = 0, g = 0, b = 0;
+    for (let k = 0; k < count; k++) {
+      const i = (x + k % side + (y + Math.floor(k / side)) * width) * 4;
+      r += colourTarget[i] / count; g += colourTarget[i + 1] / count; b += colourTarget[i + 2] / count;
+    }
+    return tintFromMeans(r, g, b);
+  }
+
+  // Shared payload/marker chroma deltas, generated before fitting to the source.
+  // Each channel's cell sum and each pixel's RGB sum are exactly zero.
+  function signalValue(kernel, k, amplitude, bit, gain) {
+    return kernel ? gain * kernel[k] : scaleWeight(amplitude, shapeWeight(k % 4, Math.floor(k / 4), bit));
+  }
+
+  function colourOffsets(kernel, redTint, blueTint, amplitude = 0, bit = 0, gain = 1) {
+    const count = kernel ? kernel.length : 16, delta = new Int16Array(count * 3);
+    let mean = 0; for (let k = 0; k < count; k++) mean += signalValue(kernel, k, amplitude, bit, gain) / count;
+    let redSum = 0, blueSum = 0, redWritten = 0, blueWritten = 0;
+    for (let k = 0; k < count; k++) {
+      const signal = signalValue(kernel, k, amplitude, bit, gain) - mean;
+      redSum += signal * redTint; blueSum += signal * blueTint;
+      const redNext = k === count - 1 ? 0 : roundHalfToEven(redSum), blueNext = k === count - 1 ? 0 : roundHalfToEven(blueSum);
+      const red = redNext - redWritten, blue = blueNext - blueWritten;
+      delta[k * 3] = red; delta[k * 3 + 1] = -red - blue; delta[k * 3 + 2] = blue;
+      redWritten = redNext; blueWritten = blueNext;
+    }
+    return delta;
+  }
+
+  function tintedWavelet(amplitude, bit, redTint, blueTint) {
+    const delta = colourOffsets(null, redTint, blueTint, amplitude, bit);
+    for (let k = 0; k < 16; k++) {
+      const signal = scaleWeight(amplitude, shapeWeight(k % 4, Math.floor(k / 4), bit));
+      for (let c = 0; c < 3; c++) delta[k * 3 + c] += signal;
+    }
+    return delta;
+  }
+
+  function fitTintedWavelet(reference, colourTarget, width, x, y, bit, amplitude, localFit) {
+    const [redTint, blueTint] = signalTint(colourTarget, width, x, y, 4);
+    if (Math.max(Math.abs(redTint), Math.abs(blueTint)) < .001) return null;
+    const zeroBias = localFit ? fitBias(reference, width, x, y, 0, amplitude) : { shift: [0, 0, 0] };
+    const oneBias = localFit ? fitBias(reference, width, x, y, 1, amplitude) : { shift: [0, 0, 0] };
+    const fits = (delta, bias) => {
+      for (let k = 0; k < 16; k++) for (let c = 0; c < 3; c++) {
+        const value = reference[(x + k % 4 + (y + Math.floor(k / 4)) * width) * 4 + c] + delta[k * 3 + c] + bias.shift[c];
+        if (value < 0 || value > 255) return false;
+      }
+      return true;
+    };
+    for (let amount = 1; amount >= 1 / 32; amount /= 2) {
+      const zero = tintedWavelet(amplitude, 0, redTint * amount, blueTint * amount);
+      const one = tintedWavelet(amplitude, 1, redTint * amount, blueTint * amount);
+      if (fits(zero, zeroBias) && fits(one, oneBias))
+        return { delta: bit ? one : zero, redTint: redTint * amount, blueTint: blueTint * amount };
+    }
+    return null;
   }
 
   function scatterOrder(blockCount, seed) {
@@ -1886,21 +1959,98 @@
     return version === CARRIER_V4 ? 1 : locatorGain(grid, cell) * (main ? 1 : 0.65);
   }
 
+  function markerSignalPolicy(signalPolicy, version, main) {
+    if (!signalPolicy || !compactCarrier(version)) return signalPolicy;
+    const policy = { ...signalPolicy,
+      strength: Math.max(signalPolicy.markerMinimum ?? 12, signalPolicy.strength),
+      textureGain: Math.max(signalPolicy.markerTextureMinimum ?? 0.5, signalPolicy.textureGain) };
+    // Corners have far fewer repeats than the payload. Keep their existing
+    // strength/texture boost and 32-level ceiling, including during local fit.
+    return main ? { ...policy,
+      strength: Math.min(V5_MARKER_PEAK, Math.round(policy.strength * 4 / 3)),
+      textureGain: policy.textureGain * 1.5,
+      markerPeak: Math.min(V5_MARKER_PEAK, Math.round(policy.markerPeak * 4 / 3)) } : policy;
+  }
+
+  function markerBackground(basis, kernels, requested, preferred, localFit, allowLift) {
+    const shifts = new Int16Array(3); if (!localFit) return shifts;
+    const count = kernels[0].length;
+    for (let c = 0; c < 3; c++) {
+      let lower = -Infinity, upper = Infinity;
+      for (const kernel of kernels) for (let k = 0; k < count; k++) {
+        const value = basis[k * 3 + c] + (allowLift ? requested * kernel[k] : 0);
+        lower = Math.max(lower, -value); upper = Math.min(upper, 255 - value);
+      }
+      lower = Math.ceil(lower); upper = Math.floor(upper);
+      if (lower > upper) {
+        if (allowLift) return markerBackground(basis, kernels, requested, preferred, localFit, false);
+        throw new Error("The V6 marker background cannot fit the channel range.");
+      }
+      shifts[c] = clampRange(Math.round(preferred[c]), lower, upper);
+    }
+    return shifts;
+  }
+
+  function fitV6MarkerSignal(basis, kernels, gain, redTint, blueTint, shifts) {
+    const count = kernels[0].length, deltas = [];
+    for (const kernel of kernels) {
+      const tint = colourOffsets(kernel, redTint, blueTint, 0, 0, gain);
+      const delta = new Float64Array(count * 3); deltas.push(delta);
+      for (let k = 0; k < count; k++) for (let c = 0; c < 3; c++) {
+        delta[k * 3 + c] = gain * kernel[k] + tint[k * 3 + c];
+        const value = basis[k * 3 + c] + shifts[c] + delta[k * 3 + c];
+        if (value < -1e-7 || value > 255 + 1e-7) return null;
+      }
+    }
+    return { deltas, shifts };
+  }
+
+  function paintV6MarkerCell(colourTarget, output, width, x, y, side, basis, kernels, bit, requested, preferred, localFit, colour, allowLift = false) {
+    // Establish and freeze the background first. Extra lift is allowed only
+    // after the actual native corner checks have rejected the matched mean.
+    const shifts = markerBackground(basis, kernels, requested, preferred, localFit, allowLift);
+    const [redTint, blueTint] = colour ? signalTint(colourTarget, width, x, y, side) : [0, 0];
+    let gain = requested;
+    for (const kernel of kernels) for (let k = 0; k < kernel.length; k++) {
+      if (kernel[k] === 0) continue;
+      for (let c = 0; c < 3; c++) {
+        const value = basis[k * 3 + c] + shifts[c];
+        gain = Math.min(gain, kernel[k] > 0 ? (255 - value) / kernel[k] : value / -kernel[k]);
+      }
+    }
+    gain = Math.max(0, gain);
+    let fit = null;
+    for (const amount of [1, .5, .25, .125, .0625, .03125, 0]) {
+      fit = fitV6MarkerSignal(basis, kernels, gain, redTint * amount, blueTint * amount, shifts);
+      if (fit) break;
+    }
+    if (!fit) throw new Error("The V6 marker signal cannot fit its prepared background.");
+    const count = side ** 2, values = new Float64Array(count);
+    for (let c = 0; c < 3; c++) {
+      let sum = 0, written = 0;
+      for (let k = 0; k < count; k++) {
+        sum += basis[k * 3 + c]; values[k] = basis[k * 3 + c] + shifts[c] + fit.deltas[bit][k * 3 + c];
+        const i = (x + k % side + (y + Math.floor(k / side)) * width) * 4 + c;
+        output[i] = Math.round(clampByte(values[k])); written += output[i];
+      }
+      const target = clampRange(Math.round(sum + count * shifts[c]), 0, count * 255);
+      while (written !== target) {
+        const step = written < target ? 1 : -1; let best = -1, error = -Infinity;
+        for (let k = 0; k < count; k++) {
+          const i = (x + k % side + (y + Math.floor(k / side)) * width) * 4 + c;
+          if (output[i] + step < 0 || output[i] + step > 255) continue;
+          const residual = step * (values[k] - output[i]);
+          if (residual > error) { best = i; error = residual; }
+        }
+        if (best < 0) throw new Error('The V6 marker average cannot be preserved.');
+        output[best] += step; written += step;
+      }
+    }
+  }
+
   function paintBlendedLocators(reference, output, width, height, strength, version, signalPolicy) {
     const p = locatorProfile(version), amplitude = Math.min(version === CARRIER_V4 ? LOCATOR_STRENGTH : 12, strength) / 16;
-    // Header symbols are not repeated as often as the data. Keep the small V5
-    // patch readable in source texture even when the payload has ample copies.
-    const markerPolicy = signalPolicy && compactCarrier(version) ? { ...signalPolicy,
-      strength: Math.max(signalPolicy.markerMinimum ?? 12, signalPolicy.strength),
-      textureGain: Math.max(signalPolicy.markerTextureMinimum ?? 0.5, signalPolicy.textureGain) } : signalPolicy;
-    // Corner headers must survive camera sampling without the payload's many
-    // repeats. Boost the actual settings, not only their lower bounds: near
-    // 2x payload repetition, strength and texture gain already exceed those
-    // bounds. Keep the existing 32-level ceiling and side-reference settings.
-    const cornerPolicy = markerPolicy && compactCarrier(version) ? { ...markerPolicy,
-      strength: Math.min(V5_MARKER_PEAK, Math.round(markerPolicy.strength * 4 / 3)),
-      textureGain: markerPolicy.textureGain * 1.5,
-      markerPeak: Math.min(V5_MARKER_PEAK, Math.round(markerPolicy.markerPeak * 4 / 3)) } : markerPolicy;
+    const markerPolicy = markerSignalPolicy(signalPolicy, version, false), cornerPolicy = markerSignalPolicy(signalPolicy, version, true);
     const edgeMarkerColumns = signalPolicy?.edgeMarkerColumns ?? (version === CARRIER_V6 ? 4 : 6);
     const side = referenceProfile(version, edgeMarkerColumns || 4);
     const reserved = reservedLocators(width, height, version, edgeMarkerColumns);
@@ -1939,8 +2089,17 @@
         const x = patch.x + cell % grid.columns * grid.cell, y = patch.y + Math.floor(cell / grid.columns) * grid.cell;
         const localAmplitude = policy ? textureAmplitude(policy.textureSource || reference, width, x, y,
           grid.cell, policy, policy.markerPeak) / 16 : amplitude;
-        let gain = localAmplitude * blendedLocatorGain(version, grid, cell, main);
-        if (signalPolicy?.rangeHeadroom) gain = linearMarkerGain(reference, width, x, y, grid, gain);
+        const requested = localAmplitude * blendedLocatorGain(version, grid, cell, main);
+        if (version === CARRIER_V6) {
+          const basis = new Float64Array(count * 3);
+          for (let k = 0; k < count; k++) for (let c = 0; c < 3; c++)
+            basis[k * 3 + c] = reference[(x + k % grid.cell + (y + Math.floor(k / grid.cell)) * width) * 4 + c];
+          paintV6MarkerCell(signalPolicy?.colourSource || signalPolicy?.textureSource || reference, output, width, x, y, grid.cell, basis,
+            grid.kernels, bit, requested, backgrounds.get(patch.id), Boolean(signalPolicy?.localFit), Boolean(signalPolicy?.colourWavelets));
+          continue;
+        }
+        let gain = requested;
+        if (signalPolicy?.rangeHeadroom || signalPolicy?.localFit) gain = linearMarkerGain(reference, width, x, y, grid, gain);
         const kernel = grid.kernels[bit];
         for (let channel = 0; channel < 3; channel++) {
           let target = 0;
@@ -1952,13 +2111,13 @@
           // Saturated pixels have no symmetric headroom. Solve the clamped mean
           // rather than shifting the whole patch lighter/darker to fit a lobe.
           let low = -64, high = 64;
-          for (let pass = 0; !signalPolicy?.rangeHeadroom && pass < 18; pass++) {
+          for (let pass = 0; !signalPolicy?.rangeHeadroom && !signalPolicy?.localFit && pass < 18; pass++) {
             const shift = (low + high) / 2;
             let total = 0;
             for (let i = 0; i < count; i++) total += clampByte(samples[i] + gain * kernel[i] + shift);
             if (total < target) low = shift; else high = shift;
           }
-          const shift = signalPolicy?.rangeHeadroom ? 0 : (low + high) / 2;
+          const shift = signalPolicy?.rangeHeadroom || signalPolicy?.localFit ? 0 : (low + high) / 2;
           let written = 0;
           for (let i = 0; i < count; i++) {
             values[i] = clampByte(samples[i] + gain * kernel[i] + shift);
@@ -2007,7 +2166,7 @@
     return projection / Math.sqrt(400 + Math.max(0, squares - sum * sum / 16));
   }
 
-  function repairV5LocatorCell(reference, output, width, height, x, y, profile, cell, bit) {
+  function repairV5LocatorCell(reference, output, width, height, x, y, profile, cell, bit, signalPolicy = null) {
     const count = profile.cell ** 2, kernel = profile.kernels[bit], sign = bit ? 1 : -1;
     const means = new Float64Array(3), targets = new Uint32Array(3);
     const source = new Float64Array(count * 3), base = new Float64Array(source.length), values = new Float64Array(source.length);
@@ -2020,6 +2179,16 @@
     // source detail still wins, reduce this cell's contrast around the SAME
     // RGB average. Always repaint from the untouched working reference.
     for (const contrast of [1, .75, .5, .25, 0]) {
+      if (profile.version === CARRIER_V6) {
+        for (let k = 0; k < count; k++) for (let c = 0; c < 3; c++)
+          base[k * 3 + c] = means[c] + contrast * (source[k * 3 + c] - means[c]);
+        const preferred = Array.from(targets, (target, c) => target / count - means[c]);
+        paintV6MarkerCell(signalPolicy?.colourSource || signalPolicy?.textureSource || reference, output, width, x, y, profile.cell, base,
+          profile.kernels, bit, V5_MARKER_PEAK / 16 * locatorGain(profile, cell), preferred,
+          Boolean(signalPolicy?.localFit), Boolean(signalPolicy?.colourWavelets));
+        if (sign * nativeLocatorCellScore(output, width, height, x, y, profile) >= V5_MARKER_NATIVE_FLOOR) return true;
+        continue;
+      }
       for (let i = 0; i < count; i++) for (let c = 0; c < 3; c++)
         base[i * 3 + c] = targets[c] / count + contrast * (source[i * 3 + c] - means[c]);
       let gain = V5_MARKER_PEAK / 16 * locatorGain(profile, cell);
@@ -2054,10 +2223,25 @@
       }
       if (sign * nativeLocatorCellScore(output, width, height, x, y, profile) >= V5_MARKER_NATIVE_FLOOR) return true;
     }
+    if (profile.version === CARRIER_V6 && signalPolicy?.localFit) {
+      // Preserve the unchanged native score threshold: extra DC is a last
+      // resort after every contrast candidate at the matched mean has failed.
+      const preferred = Array.from(targets, (target, c) => target / count - means[c]);
+      for (const scale of [.25, .5, .75, 1]) for (const contrast of [1, .75, .5, .25, 0]) {
+        for (let k = 0; k < count; k++) for (let c = 0; c < 3; c++)
+          base[k * 3 + c] = means[c] + contrast * (source[k * 3 + c] - means[c]);
+        paintV6MarkerCell(signalPolicy?.colourSource || signalPolicy?.textureSource || reference, output, width, x, y, profile.cell, base, profile.kernels, bit,
+          scale * V5_MARKER_PEAK / 16 * locatorGain(profile, cell), preferred, true, Boolean(signalPolicy.colourWavelets), true);
+        if (sign * nativeLocatorCellScore(output, width, height, x, y, profile) >= V5_MARKER_NATIVE_FLOOR) {
+          signalPolicy.liftedCornerCells++; return true;
+        }
+      }
+    }
     return false;
   }
 
-  function verifyAndRepairCompactLocators(reference, output, width, height, version) {
+  function verifyAndRepairCompactLocators(reference, output, width, height, version, signalPolicy) {
+    if (version === CARRIER_V6 && signalPolicy) signalPolicy.liftedCornerCells = 0;
     const profile = locatorProfile(version), layout = locatorLayout(width, height, version);
     if (!layout) return false;
     for (const patch of layout) {
@@ -2069,7 +2253,7 @@
         if (scores[slot] * (bit ? 1 : -1) >= V5_MARKER_NATIVE_FLOOR) continue;
         const cell = profile.order[slot], x = patch.x + cell % profile.columns * profile.cell;
         const y = patch.y + Math.floor(cell / profile.columns) * profile.cell;
-        if (!repairV5LocatorCell(reference, output, width, height, x, y, profile, cell, bit)) return false;
+        if (!repairV5LocatorCell(reference, output, width, height, x, y, profile, cell, bit, signalPolicy)) return false;
       }
       // Use the actual reader too: signal scores alone cannot establish a
       // marker ID, dimensions or CRC. Header bytes/layout are unchanged.
@@ -2348,7 +2532,7 @@
 
   function searchInWorker(pixels, width, height, options, operation = "geometry") {
     return new Promise((resolve, reject) => {
-      const url = new URL("pixelstow-transform-worker.js?v=20261020-square-edge1", codecScriptUrl);
+      const url = new URL("pixelstow-transform-worker.js?v=20261021-native-detail1", codecScriptUrl);
       const worker = new Worker(url);
       let finished = false;
       const abort = () => { if (finished) return; cleanup(); reject(new DOMException("Search cancelled.", "AbortError")); };
@@ -3249,8 +3433,8 @@
     return out;
   }
 
-  function cleanLocators(pixels, width, height, output, version = CARRIER_V6, edgeMarkerColumns = version === CARRIER_V6 ? 4 : 6) {
-    if (version !== CARRIER_V3) return cleanBlendedLocators(pixels, width, height, output, version, edgeMarkerColumns);
+  function cleanLocators(pixels, width, height, output, version = CARRIER_V6, edgeMarkerColumns = version === CARRIER_V6 ? 4 : 6, colourWavelets = false) {
+    if (version !== CARRIER_V3) return cleanBlendedLocators(pixels, width, height, output, version, edgeMarkerColumns, colourWavelets);
     const profile = locatorProfile(version);
     const { order: locatorOrder, columns: LOCATOR_COLUMNS, cell: LOCATOR_CELL } = profile;
     for (const patch of locatorLayout(width, height, version)) {
@@ -3274,8 +3458,9 @@
     }
   }
 
-  function cleanBlendedLocators(pixels, width, height, output, version, edgeMarkerColumns = version === CARRIER_V6 ? 4 : 6) {
+  function cleanBlendedLocators(pixels, width, height, output, version, edgeMarkerColumns = version === CARRIER_V6 ? 4 : 6, colourWavelets = false) {
     const profile = locatorProfile(version);
+    const channels = version === CARRIER_V6 && colourWavelets ? 3 : 1;
     const patches = locatorLayout(width, height, version).concat(compactCarrier(version) ? referenceLayout(width, height, edgeMarkerColumns) : []);
     for (const patch of patches) {
       const main = profile.ids.includes(patch.id), p = main ? profile : referenceProfile(version, edgeMarkerColumns);
@@ -3284,17 +3469,19 @@
         const cell = p.order[slot], coded = slot % (main ? 96 : 24);
         const bit = main ? WORD_BITS[header[Math.floor(coded / 12)] * 12 + coded % 12] : referenceBit(header, slot, edgeMarkerColumns), kernel = p.kernels[bit];
         const x = patch.x + cell % p.columns * p.cell, y = patch.y + Math.floor(cell / p.columns) * p.cell;
-        let projection = 0, energy = 0;
+        const projection = new Float64Array(channels); let energy = 0;
         for (let i = 0; i < kernel.length; i++) {
           const index = (x + i % p.cell + (y + Math.floor(i / p.cell)) * width) * 4;
-          projection += (pixels[index] + pixels[index + 1] + pixels[index + 2]) / 3 * kernel[i];
+          for (let c = 0; c < channels; c++) projection[c] += (channels === 1
+            ? (pixels[index] + pixels[index + 1] + pixels[index + 2]) / 3 : pixels[index + c]) * kernel[i];
           energy += kernel[i] ** 2;
         }
         const maximum = (version === CARRIER_V4 ? V4_MARKER_PEAK / 16 : V5_MARKER_PEAK / 16) * blendedLocatorGain(version, p, cell, main);
-        const amount = Math.max(0, Math.min(maximum, projection / energy));
+        const limit = channels === 3 ? maximum * (1 + COLOUR_WAVELET_TINT) + 3 / 16 : maximum;
+        const amounts = projection.map(value => Math.max(0, Math.min(limit, value / energy)));
         for (let i = 0; i < kernel.length; i++) {
           const index = (x + i % p.cell + (y + Math.floor(i / p.cell)) * width) * 4;
-          for (let c = 0; c < 3; c++) output[index + c] = clampChannel(pixels[index + c] - amount * kernel[i]);
+          for (let c = 0; c < 3; c++) output[index + c] = clampChannel(pixels[index + c] - amounts[channels === 1 ? 0 : c] * kernel[i]);
         }
       }
     }
@@ -3319,7 +3506,8 @@
     const pilot = compactCarrier(version) && signalPolicy?.scalePilot;
     const flags = (pilot || compactCarrier(version) && signalPolicy?.edgeGuide ? 0 : FLAGS) | (parityBits === 1 ? ONE_PARITY : 0) |
       (compactCarrier(version) ? (((signalPolicy?.rangeHeadroom || 0) / 2) << 2) |
-        (signalPolicy?.scalePilot ? SCALE_PILOT_FLAG : 0) : 0);
+        (signalPolicy?.scalePilot ? SCALE_PILOT_FLAG : 0) : 0) |
+      (version === CARRIER_V6 && signalPolicy?.colourWavelets ? V6_COLOUR_FLAG : 0);
     const bytes = new Uint8Array(9);
     bytes[0] = version === CARRIER_V6 ? signalPolicy?.edgeMarkers === false ? V6_NO_EDGE_MARKERS_MAGIC : V6_MAGIC : MAGIC;
     bytes[1] = locatorProfile(version) ? version : CARRIER_V1;
@@ -3327,8 +3515,9 @@
     // The high length bits identify the range curve and V6 allocation layout;
     // both are covered by the existing preamble CRC.
     writeU32(bytes, 3, framed.length | (version === CARRIER_V6
-      ? CURVED_RANGE_FLAG | RISK_ALLOCATION_FLAG |
-        (Math.round(normalizeBrightnessCurve(signalPolicy?.brightnessCurve) * V6_BRIGHTNESS_LEVELS) << V6_BRIGHTNESS_SHIFT) |
+      ? (signalPolicy?.rangeHeadroom ? CURVED_RANGE_FLAG : 0) | RISK_ALLOCATION_FLAG |
+        ((signalPolicy?.rangeCurve === "sinusoidal" ? V6_GENTLE_CURVE :
+          Math.round(normalizeBrightnessCurve(signalPolicy?.brightnessCurve) * V6_BRIGHTNESS_LEVELS)) << V6_BRIGHTNESS_SHIFT) |
         (signalPolicy?.luminanceCurve ? V6_LUMINANCE_FLAG : 0)
       : compactCarrier(version) && signalPolicy?.rangeCurve === "sinusoidal" ? CURVED_RANGE_FLAG : 0));
     const crc = crc32(bytes, 0, 7) & 0xFFFF;
@@ -3348,10 +3537,11 @@
       const metadataSlots = Uint32Array.from(layout.order.subarray(0, RISK_MAP_BLOCKS), (position) => map[PREAMBLE_BLOCKS + position]);
       await writeBits(reference, image, width, columns, metadataSlots,
         (slot) => codedBit(metadata, slot % (RISK_MAP_BYTES * 12), 12), strength, amplitudeCache, signalPolicy);
+      const payloadPolicy = signalPolicy?.colourWavelets ? { ...signalPolicy, tintPayload: true } : signalPolicy;
       const allocation = await walkRiskAllocation(risks, layout, framed.length * bitsPerByte, (bit, index) => {
         const physical = map[index];
         applyBit(reference, image, width, physical % columns, Math.floor(physical / columns),
-          codedBit(framed, bit, bitsPerByte), strength, amplitudeCache, signalPolicy);
+          codedBit(framed, bit, bitsPerByte), strength, amplitudeCache, payloadPolicy);
       });
       return { ...repetitionBudget(payloadBlocks, framed.length, bitsPerByte), copies: allocation.minCopies,
         riskAllocation: { ...allocation, mapCorrections: 0 } };
@@ -3403,19 +3593,22 @@
     const storedLength = readU32(bytes, 3);
     const curvedRange = Boolean(storedLength & CURVED_RANGE_FLAG);
     const brightnessCode = (storedLength >>> V6_BRIGHTNESS_SHIFT) & 255;
+    const gentleCurve = bytes[1] === CARRIER_V6 && brightnessCode === V6_GENTLE_CURVE;
     if (curvedRange && !compactCarrier(bytes[1])) return null;
     // CB identifies square 4x4 midpoint references; CA omits them. Older V6
     // development layouts are rejected rather than given the wrong payload map.
-    if (bytes[1] === CARRIER_V6 && (!curvedRange || brightnessCode > V6_BRIGHTNESS_LEVELS || !(storedLength & RISK_ALLOCATION_FLAG) ||
-      (bytes[2] & (FLAGS | SCALE_PILOT_FLAG)) || !(bytes[2] & 0x7c))) return null;
+    if (bytes[1] === CARRIER_V6 && (brightnessCode > V6_GENTLE_CURVE || !(storedLength & RISK_ALLOCATION_FLAG) ||
+      gentleCurve && (storedLength & V6_LUMINANCE_FLAG) ||
+      (bytes[2] & FLAGS) || curvedRange !== Boolean(bytes[2] & 0x7c) ||
+      !curvedRange && (brightnessCode || (storedLength & V6_LUMINANCE_FLAG)))) return null;
     const luminanceCurve = bytes[1] === CARRIER_V6 && Boolean(storedLength & V6_LUMINANCE_FLAG);
-    const brightnessCurve = bytes[1] === CARRIER_V6 ? brightnessCode / V6_BRIGHTNESS_LEVELS : undefined;
+    const brightnessCurve = bytes[1] === CARRIER_V6 && !gentleCurve ? brightnessCode / V6_BRIGHTNESS_LEVELS : undefined;
     const framedLength = storedLength & (bytes[1] === CARRIER_V6 ? V6_FRAME_LENGTH_MASK : 0x7FFFFFFF);
     if (framedLength < 1 || framedLength > MAX_FRAMED) return null;
-    return { version: bytes[1], flags: bytes[2], framedLength, colourWavelets: false, luminanceCurve, brightnessCurve,
+    return { version: bytes[1], flags: bytes[2], framedLength, colourWavelets: bytes[1] === CARRIER_V6 && Boolean(bytes[2] & V6_COLOUR_FLAG), luminanceCurve, brightnessCurve,
       edgeMarkers: compactCarrier(bytes[1]) && bytes[0] !== V6_NO_EDGE_MARKERS_MAGIC,
       edgeMarkerColumns: bytes[1] === CARRIER_V6 ? bytes[0] === V6_MAGIC ? 4 : 0 : compactCarrier(bytes[1]) ? 6 : 0,
-      rangeCurve: bytes[1] === CARRIER_V6 ? luminanceCurve ? "luminance-v2" : "magnifier-3-16" : curvedRange ? "sinusoidal" : "linear" };
+      rangeCurve: bytes[1] === CARRIER_V6 ? curvedRange ? gentleCurve ? "sinusoidal" : luminanceCurve ? "luminance-v2" : "magnifier-3-16" : "linear" : curvedRange ? "sinusoidal" : "linear" };
   }
 
   function combineScores(blockScores, order, codedBits) {
@@ -3547,7 +3740,7 @@
       ...(riskAllocation ? { copies: riskAllocation.minCopies, riskAllocation } : {}),
       carrierVersion: preamble.version,
       rangeHeadroom, rangeCurve: preamble.rangeCurve, brightnessCurve: preamble.brightnessCurve, luminanceCurve: preamble.luminanceCurve,
-      colourWavelets: false, scalePilot, scalePilotAmplitude, edgeGuide, edgeMarkers: preamble.edgeMarkers, edgeMarkerColumns: preamble.edgeMarkerColumns
+      colourWavelets: preamble.colourWavelets, scalePilot, scalePilotAmplitude, edgeGuide, edgeMarkers: preamble.edgeMarkers, edgeMarkerColumns: preamble.edgeMarkerColumns
     };
   }
 
@@ -3897,11 +4090,14 @@
     }
   }
 
-  async function encodeAt(reference, width, height, payload, passwordProtected, strength, adaptive, bundle, carrierVersion, quality = DEFAULT_QUALITY, scalePilot = false, edgeGuide = false, brightnessCurve, luminanceCurve = true, edgeMarkers = true) {
+  async function encodeAt(reference, width, height, payload, passwordProtected, strength, adaptive, bundle, carrierVersion, quality = DEFAULT_QUALITY, scalePilot = false, edgeGuide = false, brightnessCurve, luminanceCurve = true, edgeMarkers = true, rangeConditioning = true, colourWavelets = true, sourceCurve = "gentle") {
     strength = Math.max(1, Math.min(32, strength));
     const version = locatorProfile(carrierVersion) ? carrierVersion : CARRIER_V1;
     const edgeMarkerColumns = version === CARRIER_V6 ? edgeMarkers ? 4 : 0 : compactCarrier(version) ? 6 : 0;
-    brightnessCurve = version === CARRIER_V6 ? normalizeBrightnessCurve(brightnessCurve) : undefined;
+    const conditioned = version !== CARRIER_V6 || rangeConditioning;
+    const gentleCurve = version === CARRIER_V6 && conditioned && sourceCurve === "gentle";
+    brightnessCurve = version === CARRIER_V6 ? conditioned ? gentleCurve ? undefined : normalizeBrightnessCurve(brightnessCurve) : 0 : undefined;
+    luminanceCurve = version === CARRIER_V6 && conditioned && !gentleCurve && luminanceCurve;
     const map = locatorProfile(version) ? locatorBlockMap(width, height, Infinity, version, edgeMarkerColumns) : null;
     const probe = await packFrame(payload, 8, passwordProtected, bundle);
     const columns = Math.floor(width / BLOCK);
@@ -3927,11 +4123,11 @@
     const framed = await packFrame(payload, strength, passwordProtected, bundle);
     let signalSource = reference;
     if (compactCarrier(version)) {
-      const headroom = sourceRangeHeadroom(strength, signalPolicy, scalePilot);
+      const headroom = conditioned ? sourceRangeHeadroom(strength, signalPolicy, scalePilot) : 0;
       // Adjust the source before painting any carrier. The range curve must
       // never be applied to completed wavelets: that would change their shape.
-      const rangeCurve = version === CARRIER_V6 ? luminanceCurve ? "luminance-v2" : "magnifier-3-16" : "sinusoidal";
-      signalSource = version === CARRIER_V6 && luminanceCurve
+      const rangeCurve = version === CARRIER_V6 ? conditioned ? gentleCurve ? "sinusoidal" : luminanceCurve ? "luminance-v2" : "magnifier-3-16" : "linear" : "sinusoidal";
+      signalSource = !conditioned ? reference.slice() : version === CARRIER_V6 && luminanceCurve
         ? await mapLuminanceRange(reference, headroom, rangeCurve, brightnessCurve)
         : mapRange(reference, headroom, rangeCurve, false, brightnessCurve);
       if (scalePilot) signalSource = applyScalePilot(signalSource, width);
@@ -3939,15 +4135,17 @@
       // clipping at dark/bright extrema.
       if (edgeGuide) signalSource = root.PixelStowEdgeGuide.apply(signalSource, width, height);
       signalPolicy = { ...signalPolicy, rangeHeadroom: headroom, rangeCurve, brightnessCurve,
-        luminanceCurve: version === CARRIER_V6 && luminanceCurve, textureSource: reference, scalePilot, edgeGuide, edgeMarkers, edgeMarkerColumns };
+        luminanceCurve: version === CARRIER_V6 && luminanceCurve, textureSource: reference, colourSource: reference, scalePilot, edgeGuide, edgeMarkers, edgeMarkerColumns,
+        localFit: !conditioned, colourWavelets: version === CARRIER_V6 && colourWavelets };
     }
     let output = signalSource.slice();
     const written = await writeSignal(signalSource, output, width, height, framed, strength, version, map, signalPolicy);
     if (map) paintLocators(signalSource, output, width, height, strength, version, signalPolicy);
-    const markersVerified = !compactCarrier(version) || verifyAndRepairCompactLocators(signalSource, output, width, height, version);
+    const markersVerified = !compactCarrier(version) || verifyAndRepairCompactLocators(signalSource, output, width, height, version, signalPolicy);
     return {
       pixels: output,
       markersVerified,
+      liftedCornerCells: signalPolicy?.liftedCornerCells || 0,
       strength,
       copies: written.copies,
       parityBits: written.parityBits,
@@ -3960,7 +4158,7 @@
       rangeCurve: signalPolicy?.rangeCurve || "linear",
       brightnessCurve: signalPolicy?.brightnessCurve,
       luminanceCurve: Boolean(signalPolicy?.luminanceCurve),
-      colourWavelets: false,
+      colourWavelets: Boolean(signalPolicy?.colourWavelets),
       scalePilot: Boolean(signalPolicy?.scalePilot),
       scalePilotAmplitude: signalPolicy?.scalePilot ? SCALE_PILOT.amplitude : 0,
       edgeGuide: Boolean(signalPolicy?.edgeGuide),
@@ -4017,7 +4215,8 @@
       const usedVersion = wantLocators && locatorFits(width, height, preferredCarrier) ? preferredCarrier : CARRIER_V1;
       const payload = locked ? await encryptEnvelope(plain, password, bundle) : plain.slice();
       try {
-        let encoded = await encodeAt(pixels, width, height, payload, locked, STRENGTHS[0], true, bundle, usedVersion, quality, options.scalePilot === true, edgeGuide, options.brightnessCurve, options.luminanceCurve !== false, options.edgeMarkers !== false);
+        const sourceCurve = options.sourceCurve || (options.brightnessCurve !== undefined || options.luminanceCurve !== undefined ? "adjustable" : "gentle");
+        let encoded = await encodeAt(pixels, width, height, payload, locked, STRENGTHS[0], true, bundle, usedVersion, quality, options.scalePilot === true, edgeGuide, options.brightnessCurve, options.luminanceCurve !== false, options.edgeMarkers !== false, options.rangeConditioning !== false, options.colourWavelets !== false, sourceCurve);
         for (;;) {
           const recovery = encoded.markersVerified
             ? await readNative(encoded.pixels, width, height, usedVersion, encoded.strength, undefined, encoded.map) : null;
@@ -4044,6 +4243,7 @@
               brightnessCurve: encoded.brightnessCurve,
               luminanceCurve: encoded.luminanceCurve,
               colourWavelets: encoded.colourWavelets,
+              liftedCornerCells: encoded.liftedCornerCells,
               scalePilot: encoded.scalePilot,
               scalePilotAmplitude: encoded.scalePilotAmplitude,
               edgeGuide: encoded.edgeGuide,
@@ -4064,7 +4264,7 @@
             if (!encoded.markersVerified) throw new Error("The four recovery markers could not be verified in this picture. Choose another source image.");
             throw new Error("The message could not be verified in this image. Try another picture or a shorter message.");
           }
-          encoded = await encodeAt(pixels, width, height, payload, locked, next, false, bundle, usedVersion, quality, options.scalePilot === true, edgeGuide, options.brightnessCurve, options.luminanceCurve !== false, options.edgeMarkers !== false);
+          encoded = await encodeAt(pixels, width, height, payload, locked, next, false, bundle, usedVersion, quality, options.scalePilot === true, edgeGuide, options.brightnessCurve, options.luminanceCurve !== false, options.edgeMarkers !== false, options.rangeConditioning !== false, options.colourWavelets !== false, sourceCurve);
         }
       } finally { payload.fill(0); }
     } finally { plain.fill(0); }
@@ -4386,6 +4586,25 @@
     return out;
   }
 
+  function removeCarrierGuides(pixels, cleaned, width, height, fit) {
+    cleanLocators(pixels, width, height, cleaned, fit.carrierVersion, fit.edgeMarkerColumns, fit.colourWavelets);
+    if (fit.edgeGuide) {
+      if (!root.PixelStowEdgeGuide?.apply) throw new Error("The edge guide script is missing. Reload the page before extracting the source.");
+      cleaned = root.PixelStowEdgeGuide.apply(cleaned, width, height, { inverse: true });
+    }
+    if (fit.scalePilot) cleaned = applyScalePilot(cleaned, width, true, fit.scalePilotAmplitude || LEGACY_SCALE_PILOT_AMPLITUDE);
+    return cleaned;
+  }
+
+  async function undoSourceRange(pixels, width, height, fit, photographed, signal) {
+    if (!fit.rangeHeadroom) return pixels;
+    return fit.luminanceCurve
+      ? restoreLuminanceRange(pixels, width, height, fit.rangeHeadroom, fit.rangeCurve, fit.brightnessCurve, photographed, signal)
+      : photographed
+        ? restorePhotoRange(pixels, width, height, fit.rangeHeadroom, fit.rangeCurve, signal, fit.brightnessCurve)
+        : mapRange(pixels, fit.rangeHeadroom, fit.rangeCurve, true, fit.brightnessCurve);
+  }
+
   async function extractCarrier(pixels, width, height, strength, options = {}) {
     checkCancelled(options.signal);
     if (options.background && canUseReaderWorker(options)) {
@@ -4417,22 +4636,30 @@
       : await resampleReadSpace(pixels, width, height, origW, origH, fit.scaleX, fit.scaleY, fit.phaseX, fit.phaseY);
     const photographed = !identity;
     const payloadMap = locatorBlockMap(origW, origH, Infinity, fit.carrierVersion, fit.edgeMarkerColumns);
-    let cleaned = await extractBlind(restored, origW, origH, fit.strength, payloadMap,
-      fit.carrierVersion === CARRIER_V4 || compactCarrier(fit.carrierVersion) ? V4_PAYLOAD_PEAK : fit.strength,
-      { separateChannels: photographed, signal: options.signal });
-    cleanLocators(restored, origW, origH, cleaned, fit.carrierVersion, fit.edgeMarkerColumns);
-    if (fit.edgeGuide) {
-      if (!root.PixelStowEdgeGuide?.apply) throw new Error("The edge guide script is missing. Reload the page before extracting the source.");
-      cleaned = root.PixelStowEdgeGuide.apply(cleaned, origW, origH, { inverse: true });
+    let colourBlocks = null;
+    if (fit.colourWavelets) {
+      const layout = riskLayout(payloadMap, origW, origH);
+      colourBlocks = new Uint8Array(Math.floor(origW / BLOCK) * Math.floor(origH / BLOCK));
+      for (let slot = RISK_MAP_BLOCKS; slot < layout.order.length; slot++) colourBlocks[payloadMap[PREAMBLE_BLOCKS + layout.order[slot]]] = 1;
     }
-    if (fit.scalePilot) cleaned = applyScalePilot(cleaned, origW, true, fit.scalePilotAmplitude || LEGACY_SCALE_PILOT_AMPLITUDE);
+    const peak = fit.carrierVersion === CARRIER_V4 || compactCarrier(fit.carrierVersion) ? V4_PAYLOAD_PEAK : fit.strength;
+    let cleaned = await extractBlind(restored, origW, origH, fit.strength, payloadMap, peak,
+      { separateChannels: photographed, colourBlocks, signal: options.signal });
+    const preparedSource = cleaned;
+    cleaned = removeCarrierGuides(restored, cleaned, origW, origH, fit);
+    if (identity && fit.colourWavelets) {
+      // The first pass supplies block colours only. Independent RGB projections
+      // also contain genuine colour detail, so they must not be the final image.
+      // Regenerate the writer's bounded integer chroma deltas from the estimated
+      // original palette, while retaining the neutral reader's two coefficients.
+      const colourSource = await undoSourceRange(cleaned, origW, origH, fit, false, options.signal);
+      cleaned = await extractBlind(restored, origW, origH, fit.strength, payloadMap, peak,
+        { colourBlocks, colourSource, preparedSource, localFit: !fit.rangeHeadroom, signal: options.signal });
+      cleaned = removeCarrierGuides(restored, cleaned, origW, origH, fit);
+    }
     // Encoding applies the range shoulder on the native grid before guides and
     // wavelets. Undo it here, on that same grid, after those signals are gone.
-    if (fit.rangeHeadroom) cleaned = fit.luminanceCurve
-      ? await restoreLuminanceRange(cleaned, origW, origH, fit.rangeHeadroom, fit.rangeCurve, fit.brightnessCurve, photographed, options.signal)
-      : photographed
-        ? await restorePhotoRange(cleaned, origW, origH, fit.rangeHeadroom, fit.rangeCurve, options.signal, fit.brightnessCurve)
-        : mapRange(cleaned, fit.rangeHeadroom, fit.rangeCurve, true, fit.brightnessCurve);
+    cleaned = await undoSourceRange(cleaned, origW, origH, fit, photographed, options.signal);
     if (fit.carrierVersion === CARRIER_V6 && options.restoreColour !== false) {
       // The stored histogram is the final colour step. It runs after the range
       // inverse and still inside the native rectangle, before the picture is
@@ -4448,6 +4675,7 @@
     assertImage(pixels, width, height);
     strength = Math.max(1, Math.min(32, strength | 0));
     const neutralMaximum = Math.max(1, peakStrength / strength);
+    const colourMaximum = Math.max(1, Math.ceil(peakStrength * (1 + COLOUR_WAVELET_TINT) + 3) / strength);
     const common = new Float64Array(16);
     const difference = new Float64Array(16);
     let mean = 0;
@@ -4478,14 +4706,16 @@
     if (included) for (const block of map) included[block] = 1;
     // Camera processing can give neutral payloads different carrier gain in
     // R/G/B. Keep channel-aware removal for photographed images.
-    const channelCount = options.separateChannels ? 3 : 1;
+    const channelCount = options.separateChannels || options.colourBlocks ? 3 : 1;
     const markers = new Float64Array(channelCount), bits = new Float64Array(channelCount);
+    const nativeKernel = options.colourSource ? new Float64Array(16) : null;
     for (let row = 0; row < rows; row++) {
       if ((row & 15) === 15) { await yieldNow(); checkCancelled(options.signal); }
       for (let column = 0; column < columns; column++) {
         if (included && !included[column + row * columns]) continue;
-        const channels = channelCount;
-        const maximum = neutralMaximum;
+        const coloured = options.colourBlocks?.[column + row * columns];
+        const channels = options.separateChannels || coloured ? 3 : 1;
+        const maximum = coloured ? colourMaximum : neutralMaximum;
         markers.fill(0); bits.fill(0);
         for (let y = 0; y < 4; y++) {
           for (let x = 0; x < 4; x++) {
@@ -4497,6 +4727,22 @@
               bits[c] += brightness * difference[k];
             }
           }
+        }
+        if (coloured && nativeKernel) {
+          const marker = clampRange((markers[0] + markers[1] + markers[2]) / (3 * commonEnergy), 0, neutralMaximum);
+          const bit = clampRange((bits[0] + bits[1] + bits[2]) / (3 * differenceEnergy), -neutralMaximum / 2, neutralMaximum / 2);
+          for (let k = 0; k < 16; k++) nativeKernel[k] = marker * common[k] + bit * difference[k];
+          // Use the same palette and gamut-fit code as the writer, including
+          // its reduced-tint fallback. Never infer a separate RGB detail gain.
+          const amplitude = Math.max(1, Math.round(strength * (marker + 2 * Math.abs(bit)) / 2));
+          const tint = fitTintedWavelet(options.preparedSource, options.colourSource, width,
+            column * BLOCK, row * BLOCK, bit > 0 ? 1 : 0, amplitude, options.localFit);
+          const chroma = colourOffsets(nativeKernel, tint?.redTint || 0, tint?.blueTint || 0);
+          for (let k = 0; k < 16; k++) {
+            const pixel = (column * BLOCK + k % 4 + (row * BLOCK + Math.floor(k / 4)) * width) * 4;
+            for (let c = 0; c < 3; c++) carrier[pixel + c] = clampChannel(pixels[pixel + c] - nativeKernel[k] - chroma[k * 3 + c]);
+          }
+          continue;
         }
         for (let c = 0; c < channels; c++) {
           markers[c] = clampRange(markers[c] / commonEnergy, 0, maximum);
