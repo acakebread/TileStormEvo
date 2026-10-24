@@ -252,22 +252,25 @@
       document.addEventListener("fullscreenchange", onFullscreenChange);
       document.addEventListener("webkitfullscreenchange", onFullscreenChange);
       document.addEventListener("keydown", function (event) {
+        // Let Unity handle level reloads while retaining modified browser refresh shortcuts.
+        if (event.key === "F5" && unityInstance && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey)
+          event.preventDefault();
         if (event.key === "Escape" && mobileExpanded) exitFullscreen();
       });
       updateFullscreenButton();
 
-      var version = "0.1.184";
+      var version = "0.1.185";
       var buildUrl = "Build";
-      var loaderUrl = buildUrl + "/a7182a68cdd726c94c013b63aeb4ec3e.loader.js?v=" + version;
+      var loaderUrl = buildUrl + "/0c8f41b9c4a6bfc92583e3eb5ec164ed.loader.js?v=" + version;
       var config = {
         arguments: [],
-        dataUrl: buildUrl + "/2d0c6644820b86f4361e9c1ae3f2be38.data.unityweb?v=" + version,
-        frameworkUrl: buildUrl + "/34d208456d7f0e65bee6d1444fe98750.framework.js.unityweb?v=" + version,
-        codeUrl: buildUrl + "/08640cc49d39b7f878fb6de14f4baa20.wasm.unityweb?v=" + version,
+        dataUrl: buildUrl + "/d8bd45b99d7b5773bba0da872d0f5504.data.unityweb?v=" + version,
+        frameworkUrl: buildUrl + "/6b0f242dfcb9a6b099e335211dcb8659.framework.js.unityweb?v=" + version,
+        codeUrl: buildUrl + "/43fec207f7f82ce117a5256ff75effc0.wasm.unityweb?v=" + version,
         streamingAssetsUrl: "StreamingAssets",
         companyName: "MassiveHadron",
         productName: "TileStormEvolution",
-        productVersion: "0.1.184",
+        productVersion: "0.1.185",
       };
 
       loadingBar.style.display = "block";
