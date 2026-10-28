@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 // Pure exact-raster header verification, shared by the UI and verification worker.
 (function(root){
   'use strict';

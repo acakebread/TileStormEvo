@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 // Native readback and repeated header/CRC checks do not run in the frame loop.
 importScripts('../pixelstow-spectrum.js?v=20261017-quad1','../pixelstow-transform.js?v=20261019-v6-native1','../pixelstow.js?v=20261021-native-detail1',
   './geometry.js?v=20261018-parity1','./scan.js?v=20261018-lock-capture1');

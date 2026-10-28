@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 // Frequency evidence orders a bounded spatial search; it cannot prove that a
 // large region is empty. Stop at the first header and return it to Previous
 // BSP's guided resolver, which finishes this same retained camera raster.

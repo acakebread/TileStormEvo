@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 // Spatial constraints for the lab worker. Predictions narrow possible regions;
 // known corner topology prevents widening into an occupied, impossible corner.
 (function(root){

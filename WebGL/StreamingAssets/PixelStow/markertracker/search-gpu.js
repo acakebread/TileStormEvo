@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 // Optional worker-only WebGL2 compute. The CPU algorithms and header CRC reader
 // remain the fallback/authority; no intermediate search image is displayed.
 (function(root){

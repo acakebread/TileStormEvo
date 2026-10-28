@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 // Shared whole-frame marker acquisition and GPU template tracking.
 (function(root){
   'use strict';

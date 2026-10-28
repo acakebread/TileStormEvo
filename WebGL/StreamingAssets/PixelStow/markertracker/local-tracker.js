@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 // Lab-only planar tracking. A verified acquisition supplies the identity; this
 // follows its fixed image template without repeating marker/payload discovery.
 (function (root) {

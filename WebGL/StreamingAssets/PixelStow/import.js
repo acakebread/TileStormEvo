@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 // Thin game adapter around the unmodified PixelStow V6 snapshot. No level schema here.
 (()=>{
  'use strict';

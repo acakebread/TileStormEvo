@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 // Photograph-only recovery. This follows the carrier in the original capture;
 // it neither writes a signal nor changes the native/generated-image reader.
 (function (root) {

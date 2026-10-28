@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 // Dedicated disposable worker; its input is a copy, never the UI's pixel buffer.
 importScripts("./pixelstow-spectrum.js?v=20261015-no-pilot1", "./pixelstow-edge-guide.js?v=20261017-framed-scale1", "./pixelstow-transform.js?v=20261019-v6-native1", "./pixelstow.js?v=20261021-native-detail1");
 importScripts("./pixelstow-lattice.js?v=20261013-marker-follow2");

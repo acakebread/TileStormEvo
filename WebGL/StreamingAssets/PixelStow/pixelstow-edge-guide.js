@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 /* Low-contrast V5 calibration hint. It is never proof of a readable payload.
  * The profile is a carrier-format detail: keep these pitches, phases, placement
  * and integer rounding stable so apply(..., {inverse:true}) can remove it.

@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 // Lab geometry: verified patch poses constrain the other corners of one picture.
 (function(root){
   'use strict';

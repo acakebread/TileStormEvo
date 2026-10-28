@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 // Experimental carrier-3 geometry discovery. No canvas, DOM or server dependency.
 // Pixel-centre coordinates are used throughout; payload validation lives in the codec.
 (function (root) {

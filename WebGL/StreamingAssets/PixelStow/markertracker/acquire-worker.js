@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 // Bounded acquisition and the shared post-seed resolver. Local fitting and
 // header CRC stay on the CPU; FFT and marker pilot maps can use WebGL2.
 importScripts('../pixelstow-spectrum.js?v=20261019-guided1','../pixelstow-transform.js?v=20261019-v6-native1','../pixelstow.js?v=20261021-native-detail1','./search-gpu.js?v=20261019-gpu-output1');

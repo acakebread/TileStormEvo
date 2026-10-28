@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 // Browser PixelStow carriers; PCF1 payload/encryption envelopes are independent.
 // Plain text keeps envelope v1/v2 compatibility. Files/tone references use v3.
 (function (root) {

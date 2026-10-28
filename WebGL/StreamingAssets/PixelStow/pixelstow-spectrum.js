@@ -1,3 +1,5 @@
+// Copyright 2026 massivehadron.com ltd.
+
 // Whole-image Fourier triage for the 4-pixel carrier / 6-pixel locator families.
 // Heuristic evidence only: exact headers and frame CRC remain the acceptance test.
 (function (root) {
