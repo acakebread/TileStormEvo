@@ -1,7 +1,7 @@
 // Copyright 2026 massivehadron.com ltd.
 
 const productCachePrefix = "MassiveHadron-TileStormEvolution-";
-const buildVersion = "0.1.246";
+const buildVersion = "0.1.247";
 const scopeUrl = new URL("./", self.location.href).href;
 const cachePrefix = `TileStorm-build-v2:${scopeUrl}:${productCachePrefix}`;
 const cacheName = cachePrefix + buildVersion;
@@ -9,9 +9,9 @@ const cacheName = cachePrefix + buildVersion;
 // install time downloads it alongside Unity and can temporarily double buffers.
 // Unity's own IndexedDB data cache already owns the large .data response.
 const contentToCache = [
-    "Build/7c1b844587256dc6c2997677e33e6ea8.loader.js",
-    "Build/0196821e94ac842f04679623df1beadd.framework.js.unityweb",
-    "Build/943cae78d54d2f0e4c482c8c4d08c49f.wasm.unityweb",
+    "Build/4fb94b1e2dfe873f6a8f472f838b9957.loader.js",
+    "Build/e2e2589813e456bea68af100bcfca920.framework.js.unityweb",
+    "Build/35a6eae8bde451b897d9ea0eb74b4f98.wasm.unityweb",
     "TemplateData/style.css"
 
 ];
