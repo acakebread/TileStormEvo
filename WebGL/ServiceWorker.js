@@ -1,7 +1,7 @@
 // Copyright 2026 massivehadron.com ltd.
 
 const productCachePrefix = "MassiveHadron-TileStormEvolution-";
-const buildVersion = "0.1.290";
+const buildVersion = "0.1.291";
 const scopeUrl = new URL("./", self.location.href).href;
 const cachePrefix = `TileStorm-build-v2:${scopeUrl}:${productCachePrefix}`;
 const cacheName = cachePrefix + buildVersion;
@@ -11,7 +11,7 @@ const cacheName = cachePrefix + buildVersion;
 const contentToCache = [
     "Build/99e9ff53c91ef0581c284a1a10747f1f.loader.js",
     "Build/82cba525e17c9d6ec2fe4d4e02fd42e6.framework.js.unityweb",
-    "Build/81759a671370eb8229fbc857cc54c74f.wasm.unityweb",
+    "Build/18e7534b517a3d531a57ba02169ade28.wasm.unityweb",
     "TemplateData/style.css"
 
 ];
